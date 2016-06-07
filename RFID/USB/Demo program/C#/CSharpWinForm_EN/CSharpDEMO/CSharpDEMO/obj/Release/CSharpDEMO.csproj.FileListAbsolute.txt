@@ -1,0 +1,17 @@
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\bin\Release\CSharpDEMO.exe.config
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\bin\Release\CSharpDEMO.exe
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\bin\Release\CSharpDEMO.pdb
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.Form1.resources
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.Properties.Resources.resources
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.csproj.GenerateResource.Cache
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.exe
+D:\Documents\Tencent Files\342211815\FileRecv\usb C#\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.pdb
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\bin\Release\CSharpDEMO.exe.config
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\bin\Release\CSharpDEMO.exe
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\bin\Release\CSharpDEMO.pdb
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.csprojResolveAssemblyReference.cache
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.Form1.resources
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.Properties.Resources.resources
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.csproj.GenerateResource.Cache
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.exe
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\USB\Demo program\C#\CSharpWinForm_EN\CSharpDEMO\CSharpDEMO\obj\Release\CSharpDEMO.pdb
