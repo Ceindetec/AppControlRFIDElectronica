@@ -1,0 +1,4 @@
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\123\Attendance_Parallax\bin\Debug\Attendance.exe.config
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\123\Attendance_Parallax\obj\Debug\Attendance.exe
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\123\Attendance_Parallax\obj\Debug\Attendance.xml
+C:\Users\CEINDETEC 01\Desktop\Proyecto Selene\RFID\123\Attendance_Parallax\obj\Debug\Attendance.pdb
