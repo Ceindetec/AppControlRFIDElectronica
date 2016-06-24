@@ -23,6 +23,7 @@
 MFRC522 INS_MFRC522(SS_PIN, RST_PIN); ///Creamos el objeto para el RC522
 WebSocketsClient INS_WebSocketsClient;
 
+//agregue comentario
 boolean Address;
 long Buscar_espacio_vacio();
 long Espacio;
