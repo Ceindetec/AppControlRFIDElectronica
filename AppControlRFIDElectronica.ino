@@ -16,12 +16,12 @@
 ///////////////////////////////////////////////////////////////////////////
 //#define DEBUG 1
 #define TEST_RFID
-#define TEST_WIFI
 #define RST_PIN  2    //Pin 9 para el reset del RC522
 #define SS_PIN  15   //Pin 10 para el SS (SDA) del RC522
 #define Programacion 5
+#define Conexion 4
 #define Puerta 16
-#define Numero_de_usuarios 1020// 255 usuarios*4 bytes
+#define Numero_de_usuarios 255
 #define Tamano_id 4
 #define USE_SERIAL Serial
 
@@ -59,11 +59,11 @@ WebSocketsClient INS_WebSocketsClient;
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE METODOS //////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-void Modo_Programacion();
-void Guardar_usuario(byte ActualUID[4], long Direccion);
-boolean Buscar_usuario(byte ActualUID[4]);
-void Borrar_usuario(long Direccion);
+boolean Guardar_Usuario(byte Array[]) ;
+boolean Buscar_Usuario(byte i_bActualUID[]);
+boolean Borrar_usuario(byte i_bActualUID[]);
 boolean compareArray(byte array1[], byte array2[]);
+boolean Insertar_Usuario(byte i_bActualUID[]);
 unsigned long ArrayToDecimal(byte array1[]);
 void CharToByte(const char* tarjeta);
 void borar_memoria_EEPROM ();
@@ -72,21 +72,25 @@ String desencriptar (char* mensaje);
 void  getNtpTime();
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght);
 long Buscar_espacio_vacio();
+byte leer_id(int direccion, int posicion);
+byte leer_num_users();
 
 ///////////////////////////////////////////////////////////////////////////
 // METODO SETUP ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 void setup() 
 {
-
+  delay(1000);
   pinMode(Programacion, OUTPUT);
+  pinMode(Conexion, OUTPUT);
   pinMode(Puerta, OUTPUT);
   digitalWrite( Programacion , LOW );
   digitalWrite( Puerta , HIGH );
+  digitalWrite( Conexion , LOW );
  
   Serial.begin(115200); //Iniciamos la comunicacion serial
   SPI.begin();        //Iniciamos el Bus SPI
-  EEPROM.begin(Numero_de_usuarios+1);  //Iniciamos la Memoria EPROM
+  EEPROM.begin((Numero_de_usuarios*4)+1);  //Iniciamos la Memoria EPROM
   INS_MFRC522.PCD_Init(SS_PIN, RST_PIN); // Iniciamos el MFRC522
   
   Serial.println();
@@ -104,6 +108,7 @@ void setup()
   Serial.println(EEPROM.read(0));
   Serial.print("Numero maximo de usuarios: ");
   Serial.println(Numero_de_usuarios);
+  delay(1000);
   #endif
 
   #ifdef DEBUG
@@ -117,8 +122,12 @@ void setup()
   while (WiFi.status() != WL_CONNECTED) 
   {
     delay(500);
+
+    #ifdef DEBUG
     USE_SERIAL.printf(".");
+    #endif
   }
+  digitalWrite( Conexion , HIGH );
 
   #ifdef DEBUG
   USE_SERIAL.println("");
@@ -132,7 +141,7 @@ void setup()
 }
 
 ///////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////
+// METODO LOOP ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 void loop() 
 {
@@ -155,15 +164,15 @@ void loop()
         ActualUID[i] = INS_MFRC522.uid.uidByte[i];
       }
       #ifdef TEST_RFID
-      USE_SERIAL.println("");
+      USE_SERIAL.println();
       #endif
       //comparamos los UID para determinar si es uno de nuestros usuarios
-      if (Buscar_usuario(ActualUID) == false) 
+      if (Buscar_Usuario(ActualUID) == false) 
       {
         #ifdef TEST_RFID
         USE_SERIAL.println("[LOOP_] El usuario no existe");
         #endif
-       
+        
         Id = ArrayToDecimal(ActualUID);
         UID = String(Id, HEX);
         JsonObject& root = jsonBuffer.createObject();
@@ -192,13 +201,13 @@ void loop()
         {
           Data[i] = (char)0;
         }
-      } 
+      }
       else 
       {
-        #ifdef DEBUG
+        #ifdef TEST_RFID
         USE_SERIAL.println("[LOOP_] Acceso concedido");
         #endif
-
+        
         Id = ArrayToDecimal(ActualUID);
         UID = String(Id, HEX);
         JsonObject& root = jsonBuffer.createObject();
@@ -206,7 +215,7 @@ void loop()
         root["accion"] = "acceso";
         root["data"] = UID;
         root.printTo(Data, sizeof(Data));
-
+        
         #ifdef DEBUG
         USE_SERIAL.printf("[LOOP_] DATA: %s\n", Data);
         USE_SERIAL.println();
@@ -237,7 +246,7 @@ void loop()
           Data[i] = (char)0;
         }
       }
-      INS_MFRC522.PICC_HaltA(); // Terminamos la lectura de la tarjeta tarjeta  actual
+      INS_MFRC522.PICC_HaltA();// Terminamos la lectura de la tarjeta tarjeta  actual
     }
   }
   delay(100);
@@ -249,69 +258,100 @@ void loop()
 
 
 ///////////////////////////////////////////////////////////////////////////
-////////////////FUNCIÓN PARA GUARDAR USUARIOS EN LA EEPROM/////////////////
+////////////////FUNCION PARA GUARDAR USUARIOS EN LA EEPROM/////////////////
 ///////////////////////////////////////////////////////////////////////////
-void Guardar_usuario(byte ActualUID[4], long Direccion) {
-  for (long j = 0; j < 4; j++) 
+boolean Guardar_Usuario(byte i_Array[]) {
+  int numero_usuarios = EEPROM.read(0);
+  if(numero_usuarios< Numero_de_usuarios)
   {
-    EEPROM.write(Direccion + j, ActualUID[j]);
+    for (byte i = 0; i < Tamano_id; i++) 
+    {
+      EEPROM.write((numero_usuarios * Tamano_id) + 1 + i, i_Array[i]);
+    }
+    EEPROM.write(0, numero_usuarios + 1);
+    EEPROM.commit();
+    return true;
   }
+  else
+  {
+    return false;
+  }
+   
 }
 
 ///////////////////////////////////////////////////////////////////////////
 //////////////////FUNCIÓN PARA BORAR USUARIOS EN LA EEPROM/////////////////
 ///////////////////////////////////////////////////////////////////////////
-void Borrar_usuario(long Direccion) 
-{
-  for (long j = 0; j < 4; j++) 
+boolean Borrar_usuario(byte i_bActualUID[]) {
+  byte j;
+  byte k;
+  int numero_usuarios = EEPROM.read(0);
+  
+  for ( j = 0; j < numero_usuarios; j++)
   {
-    EEPROM.write(Direccion + j, 0);
-    EEPROM.commit();
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////
-////////////////FUNCIÓN PARA BUSCAR USUARIOS EN LA EEPROM//////////////////
-///////////////////////////////////////////////////////////////////////////
-boolean Buscar_usuario(byte ActualUID[4]) {
-  for (long j = 0; j <= 1020; j = j + 4) {
-    if (EEPROM.read(j) == ActualUID[0]) {
-      if (EEPROM.read(j + 1) == ActualUID[1]) {
-        if (EEPROM.read(j + 2) == ActualUID[2]) {
-          if (EEPROM.read(j + 3) == ActualUID[3]) {
-            Address = j;
-            return (true);
-          }
-        }
+    for ( k = 0; k < Tamano_id; k++) 
+    {
+      if (i_bActualUID[k] != leer_id( j, k))
+      {
+        k=Tamano_id;
       }
+    }
+    if (k == 4) 
+    {
+      int direccion=0;
+      for (k = j; k < numero_usuarios; k++)
+      {
+        direccion= k*Tamano_id+1;
+        EEPROM.write(direccion + 0, leer_id( k+1, 0));
+        EEPROM.write(direccion + 1, leer_id( k+1, 1));
+        EEPROM.write(direccion + 2, leer_id( k+1, 2));
+        EEPROM.write(direccion + 3, leer_id( k+1, 3));
+      }
+      EEPROM.write(0,numero_usuarios-1);
+      EEPROM.commit();
+      return (true);
     }
   }
   return (false);
 }
 
 ///////////////////////////////////////////////////////////////////////////
-/////////////FUNCIÓN PARA BUSCAR ESPACIOS VACIOS EN LA EEPROM//////////////
+////////////////FUNCIÓN PARA BUSCAR USUARIOS EN LA EEPROM//////////////////
 ///////////////////////////////////////////////////////////////////////////
-long Buscar_espacio_vacio() 
-{
-  for (long j = 0; j <= 1020; j = j + 4) 
+boolean Buscar_Usuario(byte i_bActualUID[]) {
+  byte j;
+  byte k;
+  int numero_usuarios = EEPROM.read(0);
+  
+  #ifdef TEST_RFID
+  Serial.print("Buscando usuarios");
+  #endif
+  for ( j = 0; j < numero_usuarios; j++)
   {
-    if (EEPROM.read(j) == 0) 
+    #ifdef TEST_RFID
+    Serial.print(".");
+    #endif
+    for ( k = 0; k < Tamano_id; k++) 
     {
-      if (EEPROM.read(j + 1) == 0)
+      if (i_bActualUID[k] != leer_id( j, k))
       {
-        if (EEPROM.read(j + 2) == 0)
-        {
-          if (EEPROM.read(j + 3) == 0) 
-          {
-            USE_SERIAL.println(j);
-            return (j);
-          }
-        }
+        k=Tamano_id;
       }
     }
+    if (k == 4) 
+    {
+      #ifdef TEST_RFID
+      Serial.println();
+      Serial.println("Usuario encontrado");
+      #endif
+      return (true);
+    }
   }
-  return (1025);
+  #ifdef TEST_RFID
+  Serial.println();
+  Serial.println("Usuario NO encontrado");
+  #endif
+  return (false);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -332,11 +372,59 @@ boolean compareArray(byte array1[], byte array2[])
 
 void borar_memoria_EEPROM () 
 {
-  for ( long i = 0; i < 1023; i++) 
+  int registrosDeMemoria= (Numero_de_usuarios)*4+1;
+  for ( int i = 0; i < registrosDeMemoria; i++) 
   {
     EEPROM.write(i, 0);
   }
   EEPROM.commit();
+}
+//////////////////////////////////////////////////////////////////////////////////////
+///////////////////FUNCION LEER NUMERO DE USUARIOS////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+byte leer_num_users()
+{
+  return EEPROM.read(0);
+}
+
+/////////////////////////////////////////////////////////////////////////////////////
+///////////////////FUNCION LEER ID DE USUARIOS///////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
+byte leer_id(int direccion, int posicion)
+{
+  if (direccion < Numero_de_usuarios && posicion < Tamano_id) 
+  {
+    EEPROM.read(direccion * Tamano_id + posicion + 1 );
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////
+///////////////FUNCION INSERTAR USUARIO////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
+boolean Insertar_Usuario(byte i_bActualUID[])
+{
+   if(Buscar_Usuario(i_bActualUID)==false)
+    {
+      if(Guardar_Usuario(i_bActualUID))
+      {
+        #ifdef TEST_RFID
+        Serial.println("El nuevo usuario ha sido registrado exitosamente");
+        #endif
+      }
+      else
+      {
+        #ifdef TEST_RFID
+        Serial.println("El usuario NO fue registrado. Memoria LLENA");
+        #endif
+      }    
+    }
+    else
+    {
+      #ifdef TEST_RFID
+      Serial.println("El usuario ya esta registrado");   
+      #endif
+    }
+  
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -383,7 +471,7 @@ void CharToByte(const char* tarjeta) {
 }
 
 ////////////////////////////////////////////////////////////////////////////
-///////////////FUNCION PARA ENCRIPTAR MENSAJES /////////////////////////////
+///////////////FUNCION PARA ENCRIPTAR MENSAJES//////////////////////////////
 ////////////////////////////////////////////////////////////////////////////
 String encriptar (String msn_orgin ) 
 {
@@ -401,7 +489,7 @@ String encriptar (String msn_orgin )
     {
       mensajeOriginal[m] = msn_orgin[m];
     }
-    for ( int i = 0; i < sizeof(mensajeEncriptado);  ++i ) 
+    for ( int i = 0; i < sizeof(mensajeEncriptado);  ++i )
     {
       mensajeEncriptado[i] = (char)0;
     }
@@ -431,7 +519,7 @@ String encriptar (String msn_orgin )
 
 
 ////////////////////////////////////////////////////////////////////////////
-///////////////FUNCION PARA DESENCRIPTAR MENSAJES////////////////////////
+///////////////FUNCION PARA DESENCRIPTAR MENSAJES//////////////////////////
 ////////////////////////////////////////////////////////////////////////////
 String desencriptar (char* mensaje) 
 {
@@ -474,14 +562,14 @@ String desencriptar (char* mensaje)
         auxiliarBinario.toCharArray(charbinario, auxiliarBinario.length() + 1);
         int num = 0;
         int k = 0;
-        for (int i = strlen(charbinario) - 1; i >= 0; i--) 
+        for (int i = strlen(charbinario) - 1; i >= 0; i--)
         {
           num = (((int)charbinario[i] - 48) * pow(2, k)) + num;
           k++;
         }
         mensajeDescifrado = (char)num + mensajeDescifrado;
       } 
-      else 
+      else
       {
         return TAG_ERROR;
         break;
@@ -516,7 +604,6 @@ void getNtpTime()
   }
   mensajedatancritado = "";
 }
-
 ///////////////////////////////////////////////////////////////////////////
 // METODO WEBSOCKECTEVENT QUE MANEJA LOS EVENTOS DEL WEBSOCKET ////////////
 ///////////////////////////////////////////////////////////////////////////
@@ -538,7 +625,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         #ifdef DEBUG
           USE_SERIAL.printf("[SOCKE] EVENTO DESCONEXION\n");
         #endif
-        
+
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
@@ -586,7 +673,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         palabra = (char*) payload;
         String mensajeservidor = desencriptar(palabra);
         char charBufServer[mensajeservidor.length() + 1];
-      
+
         mensajeservidor.toCharArray(charBufServer, mensajeservidor.length() + 1);
         JsonObject& rootSocket = jsonBufferSocket.parseObject(charBufServer);
 
@@ -597,57 +684,62 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         {
           const char* data    = rootSocket["data"];
           CharToByte(data);
-          if (Buscar_usuario(identificacion) == true) 
-          {
-            #ifdef DEBUG
-            USE_SERIAL.println(Address);
-            USE_SERIAL.println("Usuario eliminado del sistema");
-            #endif
-            Borrar_usuario(Address);
-          }
+          
+          #ifdef TEST_RFID
+          Serial.println("El usuario sera eliminado");
+          #endif
+          
+         if(Borrar_usuario(identificacion))
+         {
+          #ifdef TEST_RFID
+          Serial.println("El usuario ha sido eliminado");
+          #endif
+         }
+         else
+         {
+          #ifdef TEST_RFID
+          Serial.println("El usuario no esta registrado");
+          #endif
+         }
+          
         }
         ///////////////////////////////////////////////////////////////////////////
-        else if (strcmp(accion, "INS") == 0) {
+        else if (strcmp(accion, "INS") == 0) 
+        {
           const char* data    = rootSocket["data"];
           CharToByte(data);
-          if (Buscar_usuario(identificacion) == false) 
-          {
-            Espacio = Buscar_espacio_vacio();
-            USE_SERIAL.println(Espacio);
-            if (Espacio == 1025) 
-            {
-              #ifdef DEBUG
-              USE_SERIAL.println("[MDPRG] No hay espacio en memoria");
-              #endif
-            }
-            else 
-            {
-              Guardar_usuario(identificacion, Espacio);
-              EEPROM.commit();
-              #ifdef DEBUG
-              USE_SERIAL.println("[MDPRG] El nuevo usuario ha sido registrado");
-              #endif
-            }
-          }
-          else 
-          {
-            #ifdef DEBUG
-            USE_SERIAL.println("[MDPRG] El usuario ya se encuentra registrado");
-            #endif
-          }
+          Insertar_Usuario(identificacion);
         }
         ///////////////////////////////////////////////////////////////////////////
         else if (strcmp(accion, "UPD") == 0) 
         {
           long longitud_data    = rootSocket["total"];
           long iteracion = 0;
+          int direccion=0;
+          int registrosDeMemoria= (Numero_de_usuarios)*4+1;
           borar_memoria_EEPROM ();
           for (long i = 0; i < longitud_data; i++) 
           {
             CharToByte(rootSocket["data"][i]);
-            Guardar_usuario(identificacion, iteracion);
-            iteracion = iteracion + 4;
+            if(i<longitud_data)
+            {
+              direccion= i*Tamano_id+1;
+              EEPROM.write(direccion, identificacion[0]);
+              EEPROM.write(direccion+1, identificacion[1]);
+              EEPROM.write(direccion+2, identificacion[2]);
+              EEPROM.write(direccion+3, identificacion[3]);
+            }
+            else
+            {
+              direccion= i*Tamano_id+1;
+              EEPROM.write(direccion  , 0);
+              EEPROM.write(direccion+1, 0);
+              EEPROM.write(direccion+2, 0);
+              EEPROM.write(direccion+3, 0);          
+            }
+            
           }
+          EEPROM.write(0,(byte)longitud_data);
           EEPROM.commit();
           #ifdef DEBUG
           USE_SERIAL.println("La actualizacion fue exitosa");
@@ -657,12 +749,14 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         else if (strcmp(accion, "HRO") == 0) 
         {
           #ifdef DEBUG
-          USE_SERIAL.println("ESTA ES LA HORA");
+          USE_SERIAL.print("ESTA ES LA HORA: ");
           USE_SERIAL.println(mensajeservidor);
           #endif
           
           setTime((int)rootSocket["data"][0], (int)rootSocket["data"][1], (int)rootSocket["data"][2], (int)rootSocket["data"][3], (int)rootSocket["data"][4], (int)rootSocket["data"][5]);
           prevDisplay = now() + (1200 + (random(5400)));
+          USE_SERIAL.println("Tiempo para reset......");
+          USE_SERIAL.println((prevDisplay-now())/60);
           reset = 1;
         }
         ///////////////////////////////////////////////////////////////////////////
@@ -671,7 +765,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
           digitalWrite( Puerta , LOW );
           delay(1000);
           digitalWrite( Puerta , HIGH );
-          
+
           #ifdef DEBUG
           USE_SERIAL.println("SE LE DIO PERMISO");
           #endif
@@ -682,7 +776,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         }
         break;
       }
-    ///////////////////////////////////////////////////////////////////////////  
+    ///////////////////////////////////////////////////////////////////////////
     case WStype_BIN: 
     {
         USE_SERIAL.printf("[SOCKE] Mensaje binario obtenido: %u\n", lenght);
@@ -696,3 +790,4 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
   USE_SERIAL.printf("[SOCKE] **********************************\n");
   #endif
 }
+
