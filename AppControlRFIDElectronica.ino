@@ -755,8 +755,10 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
           
           setTime((int)rootSocket["data"][0], (int)rootSocket["data"][1], (int)rootSocket["data"][2], (int)rootSocket["data"][3], (int)rootSocket["data"][4], (int)rootSocket["data"][5]);
           prevDisplay = now() + (1200 + (random(5400)));
+          #ifdef DEBUG
           USE_SERIAL.println("Tiempo para reset......");
           USE_SERIAL.println((prevDisplay-now())/60);
+          #endif
           reset = 1;
         }
         ///////////////////////////////////////////////////////////////////////////
