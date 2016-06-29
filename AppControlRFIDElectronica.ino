@@ -38,7 +38,8 @@ byte usuario[4];
 uint32_t Id;
 String UID;
 time_t prevDisplay = 0;//variable que guarda cuando se va hacer el reset
-int reset = 0;
+bool reset = 0;
+bool webconectado = 0;
 
 StaticJsonBuffer<500> jsonBuffer;
 StaticJsonBuffer<1000> jsonBufferSocket;
@@ -55,6 +56,7 @@ double claveMochila[] = {335916, 428891, 866985, 2139945, 4385521, 8713045, 1716
 
 MFRC522 INS_MFRC522(SS_PIN, RST_PIN); ///Creamos el objeto para el RC522
 WebSocketsClient INS_WebSocketsClient;
+
 
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE METODOS //////////////////////////////////////////////////
@@ -74,6 +76,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght);
 long Buscar_espacio_vacio();
 byte leer_id(int direccion, int posicion);
 byte leer_num_users();
+bool clientIsConnected(WSclient_t * client);
 
 ///////////////////////////////////////////////////////////////////////////
 // METODO SETUP ///////////////////////////////////////////////////////////
@@ -190,7 +193,21 @@ void loop()
         mensajedatancritado.replace(".00", "");
         char charBufData[mensajedatancritado.length() + 1];
         mensajedatancritado.toCharArray(charBufData, mensajedatancritado.length() + 1);
-        INS_WebSocketsClient.sendTXT(charBufData);
+        
+        if(webconectado == 1)
+         {
+            USE_SERIAL.println("ENVIANDO MENSAJE");
+            if(INS_WebSocketsClient.sendTXT(charBufData)==1)
+            {
+              USE_SERIAL.println("MENSAJE ENVIADO");
+            }
+            else
+            {
+               USE_SERIAL.println("ERROR MENSAJE");
+                ESP.restart();
+            }
+        }
+        
         for ( int i = 0; i < strlen(charBufData);  ++i ) 
         {
           charBufData[i] = (char)0;
@@ -210,6 +227,7 @@ void loop()
         
         Id = ArrayToDecimal(ActualUID);
         UID = String(Id, HEX);
+
         JsonObject& root = jsonBuffer.createObject();
         root["dispositivo"] = "RFID";
         root["accion"] = "acceso";
@@ -225,7 +243,24 @@ void loop()
         mensajedatancritado.replace(".00", "");
         char charBufData[mensajedatancritado.length() + 1];
         mensajedatancritado.toCharArray(charBufData, mensajedatancritado.length() + 1);
-        INS_WebSocketsClient.sendTXT(charBufData);
+        digitalWrite( Puerta , LOW );
+        delay(1000);
+        digitalWrite( Puerta , HIGH );
+        
+        if(webconectado == 1)
+         {
+            USE_SERIAL.println("ENVIANDO MENSAJE");
+            if(INS_WebSocketsClient.sendTXT(charBufData)==1)
+            {
+              USE_SERIAL.println("MENSAJE ENVIADO");
+            }
+            else
+            {
+               USE_SERIAL.println("ERROR MENSAJE");
+                ESP.restart();
+            }
+        }
+       
 
         for ( int i = 0; i < strlen(charBufData);  ++i ) 
         {
@@ -237,14 +272,15 @@ void loop()
         USE_SERIAL.printf("[LOOP_] DATA FOR: %s\n", Data);
         #endif
 
-        digitalWrite( Puerta , LOW );
-        delay(1000);
-        digitalWrite( Puerta , HIGH );
-
         for ( int i = 0; i < sizeof(Data);  ++i ) 
         {
           Data[i] = (char)0;
         }
+        for ( int i = 0; i < sizeof(charBufData);  ++i ) 
+        {
+          charBufData[i] = (char)0;
+        }
+        mensajedatancritado="";
       }
       INS_MFRC522.PICC_HaltA();// Terminamos la lectura de la tarjeta tarjeta  actual
     }
@@ -625,12 +661,13 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         #ifdef DEBUG
           USE_SERIAL.printf("[SOCKE] EVENTO DESCONEXION\n");
         #endif
-
+        webconectado = 0;
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
     case WStype_CONNECTED: 
     {
+        webconectado=1;
         JsonObject& root = jsonBuffer.createObject();
         root["dispositivo"] = "aaaaaaaa";
         root["accion"] = "presentacion";
@@ -786,7 +823,13 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         // send data to server
         // INS_WebSocketsClient.sendBIN(payload, lenght);
         break;
-      }
+    }
+     ///////////////////////////////////////////////////////////////////////////
+    case WStype_ERROR:
+    {
+       USE_SERIAL.printf("error en la comunicacion", lenght);
+       webconectado=0;
+    }
   }
   #ifdef DEBUG
   USE_SERIAL.printf("[SOCKE] **********************************\n");
