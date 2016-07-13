@@ -14,7 +14,7 @@
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE PINES Y VARIABLES ////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-//#define DEBUG 1
+#define DEBUG 1
 #define TEST_RFID
 #define RST_PIN  2    //Pin 9 para el reset del RC522
 #define SS_PIN  15   //Pin 10 para el SS (SDA) del RC522
@@ -40,6 +40,7 @@ String UID;
 time_t prevDisplay = 0;//variable que guarda cuando se va hacer el reset
 bool reset = 0;
 bool webconectado = 0;
+time_t timedesconectado = 0;
 
 StaticJsonBuffer<500> jsonBuffer;
 StaticJsonBuffer<1000> jsonBufferSocket;
@@ -89,7 +90,7 @@ void setup()
   pinMode(Puerta, OUTPUT);
   digitalWrite( Programacion , LOW );
   digitalWrite( Puerta , HIGH );
-  digitalWrite( Conexion , LOW );
+  digitalWrite( Conexion , HIGH );
  
   Serial.begin(115200); //Iniciamos la comunicacion serial
   SPI.begin();        //Iniciamos el Bus SPI
@@ -130,7 +131,7 @@ void setup()
     USE_SERIAL.printf(".");
     #endif
   }
-  digitalWrite( Conexion , HIGH );
+  digitalWrite( Conexion , LOW );
 
   #ifdef DEBUG
   USE_SERIAL.println("");
@@ -141,6 +142,7 @@ void setup()
 
   INS_WebSocketsClient.begin(ip_websocket, port_websocket);
   INS_WebSocketsClient.onEvent(webSocketEvent);
+  INS_WebSocketsClient.disconnect();
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -149,11 +151,25 @@ void setup()
 void loop() 
 {
   time_t t = now();
-  INS_WebSocketsClient.loop();
+  //INS_WebSocketsClient.loop();
+  if(WiFi.status() != WL_CONNECTED){
+    digitalWrite( Conexion , HIGH );
+  }
+  if(webconectado==0 && timedesconectado==0){
+    INS_WebSocketsClient.loop();
+  }
+  if(webconectado==1){
+    INS_WebSocketsClient.loop();
+  }else if(now() >= timedesconectado){
+    timedesconectado = 0;
+    INS_WebSocketsClient.loop();
+  }
+  
   // Revisamos si hay nuevas tarjetas  presentes
   if ( INS_MFRC522.PICC_IsNewCardPresent()) 
   {
     //Seleccionamos una tarjeta
+    digitalWrite( Programacion , HIGH );    
     if ( INS_MFRC522.PICC_ReadCardSerial()) {
       #ifdef TEST_RFID
       USE_SERIAL.println("[LOOP_] ********************************");
@@ -204,6 +220,8 @@ void loop()
             else
             {
                USE_SERIAL.println("ERROR MENSAJE");
+                INS_WebSocketsClient.disconnect();
+                delay(100);
                 ESP.restart();
             }
         }
@@ -257,7 +275,9 @@ void loop()
             else
             {
                USE_SERIAL.println("ERROR MENSAJE");
-                ESP.restart();
+               INS_WebSocketsClient.disconnect();
+               delay(100);
+               ESP.restart();
             }
         }
        
@@ -284,9 +304,12 @@ void loop()
       }
       INS_MFRC522.PICC_HaltA();// Terminamos la lectura de la tarjeta tarjeta  actual
     }
+    digitalWrite( Programacion , LOW);
   }
   delay(100);
   if (now() >= prevDisplay && reset == 1) {
+    INS_WebSocketsClient.disconnect();
+    delay(100);
     ESP.restart();
     reset = 0;
   }
@@ -662,14 +685,17 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
           USE_SERIAL.printf("[SOCKE] EVENTO DESCONEXION\n");
         #endif
         webconectado = 0;
+        if(timedesconectado==0){
+          timedesconectado = now()+10;
+        }
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
     case WStype_CONNECTED: 
     {
-        webconectado=1;
+        webconectado = 1;
         JsonObject& root = jsonBuffer.createObject();
-        root["dispositivo"] = "aaaaaaaa";
+        root["dispositivo"] = "cccccccc";
         root["accion"] = "presentacion";
         root["data"] = "";
         root.printTo(Data, sizeof(Data));
