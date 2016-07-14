@@ -18,9 +18,9 @@
 #define TEST_RFID
 #define RST_PIN  2    //Pin 9 para el reset del RC522
 #define SS_PIN  15   //Pin 10 para el SS (SDA) del RC522
-#define Programacion 5
-#define Conexion 4
-#define Puerta 16
+#define Programacion 5 // este indica si se leyo una tarjeta
+#define Conexion 4 // indica si hay coneccion a la red
+#define Puerta 16 //pin que corresponde al actuador
 #define Numero_de_usuarios 255
 #define Tamano_id 4
 #define USE_SERIAL Serial
@@ -28,9 +28,9 @@
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE VARIABLES GLOBALES ///////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-boolean Address;
-long Espacio;
-unsigned long xy;
+//boolean Address;
+//long Espacio;
+//unsigned long xy;
 byte ActualUID[4]; //almacenará el código del Tag leído
 byte Master[4] = {0x8B, 0x23, 0x80, 0xE5} ; //código de la tarjeta Master
 byte identificacion[4];
@@ -38,9 +38,9 @@ byte usuario[4];
 uint32_t Id;
 String UID;
 time_t prevDisplay = 0;//variable que guarda cuando se va hacer el reset
-bool reset = 0;
-bool webconectado = 0;
-time_t timedesconectado = 0;
+bool reset = 0; // bandera para indicar el reset
+bool webconectado = 0; // bandera para indicar si el socket esta conectado
+time_t timedesconectado = 0; // variable time que se usar para dar un tiempo antes de volver a solicitar peticion al socket despues de una desconeccion
 
 StaticJsonBuffer<500> jsonBuffer;
 StaticJsonBuffer<1000> jsonBufferSocket;
@@ -154,6 +154,8 @@ void loop()
   //INS_WebSocketsClient.loop();
   if(WiFi.status() != WL_CONNECTED){
     digitalWrite( Conexion , HIGH );
+  }else{
+     digitalWrite( Conexion , LOW );
   }
   if(webconectado==0 && timedesconectado==0){
     INS_WebSocketsClient.loop();
