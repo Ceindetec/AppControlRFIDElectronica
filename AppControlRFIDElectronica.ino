@@ -3,6 +3,7 @@
 // LIBRERIAS DEL PROYECTO /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 #include <ESP8266WiFi.h>
+#include <ESP8266WiFiMulti.h>
 #include <MFRC522.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
@@ -18,9 +19,9 @@
 #define TEST_RFID
 #define RST_PIN  2    //Pin 9 para el reset del RC522
 #define SS_PIN  15   //Pin 10 para el SS (SDA) del RC522
-#define Programacion 5
-#define Conexion 4
-#define Puerta 16
+#define Programacion 5 // este indica si se leyo una tarjeta
+#define Conexion 4 // indica si hay coneccion a la red
+#define Puerta 16 //pin que corresponde al actuador
 #define Numero_de_usuarios 255
 #define Tamano_id 4
 #define USE_SERIAL Serial
@@ -28,9 +29,9 @@
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE VARIABLES GLOBALES ///////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-boolean Address;
-long Espacio;
-unsigned long xy;
+//boolean Address;
+//long Espacio;
+//unsigned long xy;
 byte ActualUID[4]; //almacenará el código del Tag leído
 byte Master[4] = {0x8B, 0x23, 0x80, 0xE5} ; //código de la tarjeta Master
 byte identificacion[4];
@@ -38,9 +39,10 @@ byte usuario[4];
 uint32_t Id;
 String UID;
 time_t prevDisplay = 0;//variable que guarda cuando se va hacer el reset
-bool reset = 0;
-bool webconectado = 0;
-time_t timedesconectado = 0;
+bool reset = 0; // bandera para indicar el reset
+bool webconectado = 0; // bandera para indicar si el socket esta conectado
+bool configuracioninit = 0;
+time_t timedesconectado = 0; // variable time que se usar para dar un tiempo antes de volver a solicitar peticion al socket despues de una desconeccion
 
 StaticJsonBuffer<500> jsonBuffer;
 StaticJsonBuffer<1000> jsonBufferSocket;
@@ -49,14 +51,19 @@ const char* ssid     = "CEINDETEC2";
 const char* password = "ceindetec123*";
 const char* ip_websocket = "192.168.0.245";
 const int port_websocket = 8082;
-char Data[512];
+
+const char* identificador = "cccccccc";
+
+char Data[1024];
 char aux[4];
 
 String mensajedatancritado;
 double claveMochila[] = {335916, 428891, 866985, 2139945, 4385521, 8713045, 17162809, 34033702};
 
 MFRC522 INS_MFRC522(SS_PIN, RST_PIN); ///Creamos el objeto para el RC522
+ESP8266WiFiMulti WiFiMulti;
 WebSocketsClient INS_WebSocketsClient;
+
 
 
 ///////////////////////////////////////////////////////////////////////////
@@ -82,7 +89,7 @@ bool clientIsConnected(WSclient_t * client);
 ///////////////////////////////////////////////////////////////////////////
 // METODO SETUP ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-void setup() 
+void setup()
 {
   delay(1000);
   pinMode(Programacion, OUTPUT);
@@ -91,12 +98,12 @@ void setup()
   digitalWrite( Programacion , LOW );
   digitalWrite( Puerta , HIGH );
   digitalWrite( Conexion , HIGH );
- 
+
   Serial.begin(115200); //Iniciamos la comunicacion serial
   SPI.begin();        //Iniciamos el Bus SPI
-  EEPROM.begin((Numero_de_usuarios*4)+1);  //Iniciamos la Memoria EPROM
+  EEPROM.begin((Numero_de_usuarios * 4) + 1); //Iniciamos la Memoria EPROM
   INS_MFRC522.PCD_Init(SS_PIN, RST_PIN); // Iniciamos el MFRC522
-  
+
   Serial.println();
   Serial.println("**********************************************");
   Serial.println("*****SISTEMA DE CONTROL DE ACCESO CUSTODE*****");
@@ -106,92 +113,90 @@ void setup()
   Serial.println("**********************************************");
   delay(1000);
 
-  #ifdef TEST_RFID
+#ifdef TEST_RFID
   Serial.println("Control de acceso:");
   Serial.print("Numero de usuarios registrados: ");
   Serial.println(EEPROM.read(0));
   Serial.print("Numero maximo de usuarios: ");
   Serial.println(Numero_de_usuarios);
   delay(1000);
-  #endif
+#endif
 
-  #ifdef DEBUG
+#ifdef DEBUG
   USE_SERIAL.printf("[SETUP] Conectando a: ");
   USE_SERIAL.printf(ssid);
-  USE_SERIAL.println();  
-  #endif
+  USE_SERIAL.println();
+#endif
 
-  WiFi.begin(ssid, password);
+      
+  WiFiMulti.addAP(ssid, password);
+ 
+  
 
-  while (WiFi.status() != WL_CONNECTED) 
-  {
-    delay(500);
-
-    #ifdef DEBUG
-    USE_SERIAL.printf(".");
-    #endif
-  }
-  digitalWrite( Conexion , LOW );
-
-  #ifdef DEBUG
+#ifdef DEBUG
   USE_SERIAL.println("");
   USE_SERIAL.printf("[SETUP] WiFi conectado ");
   USE_SERIAL.printf("IP address: ");
   USE_SERIAL.println(WiFi.localIP());
-  #endif
+#endif
 
-  INS_WebSocketsClient.begin(ip_websocket, port_websocket);
-  INS_WebSocketsClient.onEvent(webSocketEvent);
-  INS_WebSocketsClient.disconnect();
+
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // METODO LOOP ///////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-void loop() 
+void loop()
 {
   time_t t = now();
-  //INS_WebSocketsClient.loop();
-  if(WiFi.status() != WL_CONNECTED){
+  if (WiFiMulti.run() != WL_CONNECTED && configuracioninit == 0) {
+    //INS_WebSocketsClient.disconnect();
+    INS_WebSocketsClient.begin(ip_websocket, port_websocket);
+    INS_WebSocketsClient.onEvent(webSocketEvent);
+    configuracioninit = 1;
+  }
+  if (WiFiMulti.run() != WL_CONNECTED) {
     digitalWrite( Conexion , HIGH );
+  } else {
+    digitalWrite( Conexion , LOW );
   }
-  if(webconectado==0 && timedesconectado==0){
+  if (webconectado == 0 && timedesconectado == 0) {
     INS_WebSocketsClient.loop();
   }
-  if(webconectado==1){
+  if (webconectado == 1) {
     INS_WebSocketsClient.loop();
-  }else if(now() >= timedesconectado){
+  } else if (now() >= timedesconectado) {
     timedesconectado = 0;
     INS_WebSocketsClient.loop();
   }
-  
+
   // Revisamos si hay nuevas tarjetas  presentes
-  if ( INS_MFRC522.PICC_IsNewCardPresent()) 
+  if ( INS_MFRC522.PICC_IsNewCardPresent())
   {
     //Seleccionamos una tarjeta
-    digitalWrite( Programacion , HIGH );    
+    digitalWrite( Programacion , HIGH );
     if ( INS_MFRC522.PICC_ReadCardSerial()) {
-      #ifdef TEST_RFID
+#ifdef TEST_RFID
       USE_SERIAL.println("[LOOP_] ********************************");
       USE_SERIAL.printf("[LOOP_] Tarjeta leida UID:");
-      #endif
+#endif
       for (byte i = 0; i < INS_MFRC522.uid.size; i++) {
-        #ifdef TEST_RFID
+#ifdef TEST_RFID
         USE_SERIAL.print(INS_MFRC522.uid.uidByte[i] < 0x10 ? " 0" : " ");
         USE_SERIAL.print(INS_MFRC522.uid.uidByte[i], HEX);
-        #endif
+#endif
         ActualUID[i] = INS_MFRC522.uid.uidByte[i];
       }
-      #ifdef TEST_RFID
+#ifdef TEST_RFID
       USE_SERIAL.println();
-      #endif
+#endif
       //comparamos los UID para determinar si es uno de nuestros usuarios
-      if (Buscar_Usuario(ActualUID) == false) 
+      if (Buscar_Usuario(ActualUID) == false)
       {
-        #ifdef TEST_RFID
+#ifdef TEST_RFID
         USE_SERIAL.println("[LOOP_] El usuario no existe");
-        #endif
-        
+#endif
+
         Id = ArrayToDecimal(ActualUID);
         UID = String(Id, HEX);
         JsonObject& root = jsonBuffer.createObject();
@@ -200,49 +205,49 @@ void loop()
         root["data"] = UID;
         root.printTo(Data, sizeof(Data));
 
-        #ifdef DEBUG
+#ifdef DEBUG
         USE_SERIAL.printf("[LOOP_] DATA: %s\n", Data);
         USE_SERIAL.println();
-        #endif
+#endif
 
         mensajedatancritado = encriptar((String)Data);
         mensajedatancritado.replace(".00", "");
         char charBufData[mensajedatancritado.length() + 1];
         mensajedatancritado.toCharArray(charBufData, mensajedatancritado.length() + 1);
-        
-        if(webconectado == 1)
-         {
-            USE_SERIAL.println("ENVIANDO MENSAJE");
-            if(INS_WebSocketsClient.sendTXT(charBufData)==1)
-            {
-              USE_SERIAL.println("MENSAJE ENVIADO");
-            }
-            else
-            {
-               USE_SERIAL.println("ERROR MENSAJE");
-                INS_WebSocketsClient.disconnect();
-                delay(100);
-                ESP.restart();
-            }
+
+        if (webconectado == 1)
+        {
+          USE_SERIAL.println("ENVIANDO MENSAJE");
+          if (INS_WebSocketsClient.sendTXT(charBufData) == 1)
+          {
+            USE_SERIAL.println("MENSAJE ENVIADO");
+          }
+          else
+          {
+            USE_SERIAL.println("ERROR MENSAJE");
+            INS_WebSocketsClient.disconnect();
+            delay(100);
+            ESP.restart();
+          }
         }
-        
-        for ( int i = 0; i < strlen(charBufData);  ++i ) 
+
+        for ( int i = 0; i < strlen(charBufData);  ++i )
         {
           charBufData[i] = (char)0;
         }
         mensajedatancritado = "";
         jsonBuffer = StaticJsonBuffer<500>();
-        for ( int i = 0; i < sizeof(Data);  ++i ) 
+        for ( int i = 0; i < sizeof(Data);  ++i )
         {
           Data[i] = (char)0;
         }
       }
-      else 
+      else
       {
-        #ifdef TEST_RFID
+#ifdef TEST_RFID
         USE_SERIAL.println("[LOOP_] Acceso concedido");
-        #endif
-        
+#endif
+
         Id = ArrayToDecimal(ActualUID);
         UID = String(Id, HEX);
 
@@ -251,11 +256,11 @@ void loop()
         root["accion"] = "acceso";
         root["data"] = UID;
         root.printTo(Data, sizeof(Data));
-        
-        #ifdef DEBUG
+
+#ifdef DEBUG
         USE_SERIAL.printf("[LOOP_] DATA: %s\n", Data);
         USE_SERIAL.println();
-        #endif
+#endif
 
         mensajedatancritado = encriptar((String)Data);
         mensajedatancritado.replace(".00", "");
@@ -264,43 +269,43 @@ void loop()
         digitalWrite( Puerta , LOW );
         delay(1000);
         digitalWrite( Puerta , HIGH );
-        
-        if(webconectado == 1)
-         {
-            USE_SERIAL.println("ENVIANDO MENSAJE");
-            if(INS_WebSocketsClient.sendTXT(charBufData)==1)
-            {
-              USE_SERIAL.println("MENSAJE ENVIADO");
-            }
-            else
-            {
-               USE_SERIAL.println("ERROR MENSAJE");
-               INS_WebSocketsClient.disconnect();
-               delay(100);
-               ESP.restart();
-            }
-        }
-       
 
-        for ( int i = 0; i < strlen(charBufData);  ++i ) 
+        if (webconectado == 1)
+        {
+          USE_SERIAL.println("ENVIANDO MENSAJE");
+          if (INS_WebSocketsClient.sendTXT(charBufData) == 1)
+          {
+            USE_SERIAL.println("MENSAJE ENVIADO");
+          }
+          else
+          {
+            USE_SERIAL.println("ERROR MENSAJE");
+            INS_WebSocketsClient.disconnect();
+            delay(100);
+            ESP.restart();
+          }
+        }
+
+
+        for ( int i = 0; i < strlen(charBufData);  ++i )
         {
           charBufData[i] = (char)0;
         }
         mensajedatancritado = "";
         jsonBuffer = StaticJsonBuffer<500>();
-        #ifdef DEBUG
+#ifdef DEBUG
         USE_SERIAL.printf("[LOOP_] DATA FOR: %s\n", Data);
-        #endif
+#endif
 
-        for ( int i = 0; i < sizeof(Data);  ++i ) 
+        for ( int i = 0; i < sizeof(Data);  ++i )
         {
           Data[i] = (char)0;
         }
-        for ( int i = 0; i < sizeof(charBufData);  ++i ) 
+        for ( int i = 0; i < sizeof(charBufData);  ++i )
         {
           charBufData[i] = (char)0;
         }
-        mensajedatancritado="";
+        mensajedatancritado = "";
       }
       INS_MFRC522.PICC_HaltA();// Terminamos la lectura de la tarjeta tarjeta  actual
     }
@@ -321,9 +326,9 @@ void loop()
 ///////////////////////////////////////////////////////////////////////////
 boolean Guardar_Usuario(byte i_Array[]) {
   int numero_usuarios = EEPROM.read(0);
-  if(numero_usuarios< Numero_de_usuarios)
+  if (numero_usuarios < Numero_de_usuarios)
   {
-    for (byte i = 0; i < Tamano_id; i++) 
+    for (byte i = 0; i < Tamano_id; i++)
     {
       EEPROM.write((numero_usuarios * Tamano_id) + 1 + i, i_Array[i]);
     }
@@ -335,7 +340,7 @@ boolean Guardar_Usuario(byte i_Array[]) {
   {
     return false;
   }
-   
+
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -345,28 +350,28 @@ boolean Borrar_usuario(byte i_bActualUID[]) {
   byte j;
   byte k;
   int numero_usuarios = EEPROM.read(0);
-  
+
   for ( j = 0; j < numero_usuarios; j++)
   {
-    for ( k = 0; k < Tamano_id; k++) 
+    for ( k = 0; k < Tamano_id; k++)
     {
       if (i_bActualUID[k] != leer_id( j, k))
       {
-        k=Tamano_id;
+        k = Tamano_id;
       }
     }
-    if (k == 4) 
+    if (k == 4)
     {
-      int direccion=0;
+      int direccion = 0;
       for (k = j; k < numero_usuarios; k++)
       {
-        direccion= k*Tamano_id+1;
-        EEPROM.write(direccion + 0, leer_id( k+1, 0));
-        EEPROM.write(direccion + 1, leer_id( k+1, 1));
-        EEPROM.write(direccion + 2, leer_id( k+1, 2));
-        EEPROM.write(direccion + 3, leer_id( k+1, 3));
+        direccion = k * Tamano_id + 1;
+        EEPROM.write(direccion + 0, leer_id( k + 1, 0));
+        EEPROM.write(direccion + 1, leer_id( k + 1, 1));
+        EEPROM.write(direccion + 2, leer_id( k + 1, 2));
+        EEPROM.write(direccion + 3, leer_id( k + 1, 3));
       }
-      EEPROM.write(0,numero_usuarios-1);
+      EEPROM.write(0, numero_usuarios - 1);
       EEPROM.commit();
       return (true);
     }
@@ -381,35 +386,35 @@ boolean Buscar_Usuario(byte i_bActualUID[]) {
   byte j;
   byte k;
   int numero_usuarios = EEPROM.read(0);
-  
-  #ifdef TEST_RFID
+
+#ifdef TEST_RFID
   Serial.print("Buscando usuarios");
-  #endif
+#endif
   for ( j = 0; j < numero_usuarios; j++)
   {
-    #ifdef TEST_RFID
+#ifdef TEST_RFID
     Serial.print(".");
-    #endif
-    for ( k = 0; k < Tamano_id; k++) 
+#endif
+    for ( k = 0; k < Tamano_id; k++)
     {
       if (i_bActualUID[k] != leer_id( j, k))
       {
-        k=Tamano_id;
+        k = Tamano_id;
       }
     }
-    if (k == 4) 
+    if (k == 4)
     {
-      #ifdef TEST_RFID
+#ifdef TEST_RFID
       Serial.println();
       Serial.println("Usuario encontrado");
-      #endif
+#endif
       return (true);
     }
   }
-  #ifdef TEST_RFID
+#ifdef TEST_RFID
   Serial.println();
   Serial.println("Usuario NO encontrado");
-  #endif
+#endif
   return (false);
 }
 
@@ -429,10 +434,10 @@ boolean compareArray(byte array1[], byte array2[])
 //////////////////FUNCION BORRAR TODOS LOS USUARIOS/////////////////////////
 ////////////////////////////////////////////////////////////////////////////
 
-void borar_memoria_EEPROM () 
+void borar_memoria_EEPROM ()
 {
-  int registrosDeMemoria= (Numero_de_usuarios)*4+1;
-  for ( int i = 0; i < registrosDeMemoria; i++) 
+  int registrosDeMemoria = (Numero_de_usuarios) * 4 + 1;
+  for ( int i = 0; i < registrosDeMemoria; i++)
   {
     EEPROM.write(i, 0);
   }
@@ -451,7 +456,7 @@ byte leer_num_users()
 /////////////////////////////////////////////////////////////////////////////////////
 byte leer_id(int direccion, int posicion)
 {
-  if (direccion < Numero_de_usuarios && posicion < Tamano_id) 
+  if (direccion < Numero_de_usuarios && posicion < Tamano_id)
   {
     EEPROM.read(direccion * Tamano_id + posicion + 1 );
   }
@@ -462,28 +467,28 @@ byte leer_id(int direccion, int posicion)
 ////////////////////////////////////////////////////////////////////////////
 boolean Insertar_Usuario(byte i_bActualUID[])
 {
-   if(Buscar_Usuario(i_bActualUID)==false)
+  if (Buscar_Usuario(i_bActualUID) == false)
+  {
+    if (Guardar_Usuario(i_bActualUID))
     {
-      if(Guardar_Usuario(i_bActualUID))
-      {
-        #ifdef TEST_RFID
-        Serial.println("El nuevo usuario ha sido registrado exitosamente");
-        #endif
-      }
-      else
-      {
-        #ifdef TEST_RFID
-        Serial.println("El usuario NO fue registrado. Memoria LLENA");
-        #endif
-      }    
+#ifdef TEST_RFID
+      Serial.println("El nuevo usuario ha sido registrado exitosamente");
+#endif
     }
     else
     {
-      #ifdef TEST_RFID
-      Serial.println("El usuario ya esta registrado");   
-      #endif
+#ifdef TEST_RFID
+      Serial.println("El usuario NO fue registrado. Memoria LLENA");
+#endif
     }
-  
+  }
+  else
+  {
+#ifdef TEST_RFID
+    Serial.println("El usuario ya esta registrado");
+#endif
+  }
+
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -503,15 +508,15 @@ void CharToByte(const char* tarjeta) {
   uint8_t num1 = 0;
   uint8_t num2 = 0;
 
-  for (int i = 0; i < 8; i = i + 2) 
+  for (int i = 0; i < 8; i = i + 2)
   {
     num1 = (uint8_t)tarjeta[i];
     num2 = (uint8_t)tarjeta[i + 1];
-    if (num1 > 47 && num1 < 58) 
+    if (num1 > 47 && num1 < 58)
     {
       num1 = num1 - 48;
     }
-    else 
+    else
     {
       num1 = num1 - 87;
     }
@@ -519,7 +524,7 @@ void CharToByte(const char* tarjeta) {
     {
       num2 = num2 - 48;
     }
-    else 
+    else
     {
       num2 = num2 - 87;
     }
@@ -532,7 +537,7 @@ void CharToByte(const char* tarjeta) {
 ////////////////////////////////////////////////////////////////////////////
 ///////////////FUNCION PARA ENCRIPTAR MENSAJES//////////////////////////////
 ////////////////////////////////////////////////////////////////////////////
-String encriptar (String msn_orgin ) 
+String encriptar (String msn_orgin )
 {
   char mensajeOriginal[msn_orgin.length() + 1];
   String mensajeEncriptado = "";
@@ -542,9 +547,9 @@ String encriptar (String msn_orgin )
   double auxiliarCaracterEncriptado;
   double auxdouble;
 
-  if (msn_orgin != "") 
+  if (msn_orgin != "")
   {
-    for (int m = 0; m < msn_orgin.length(); m++) 
+    for (int m = 0; m < msn_orgin.length(); m++)
     {
       mensajeOriginal[m] = msn_orgin[m];
     }
@@ -552,19 +557,19 @@ String encriptar (String msn_orgin )
     {
       mensajeEncriptado[i] = (char)0;
     }
-    for (int i = 0 ; i < msn_orgin.length() ; i++ ) 
+    for (int i = 0 ; i < msn_orgin.length() ; i++ )
     {
       complementoBinario = cadenaCeros.substring(0, 8 - String(mensajeOriginal[i], BIN).length());
       caracterBinarioCompleto = complementoBinario + String(mensajeOriginal[i], BIN);
       auxiliarCaracterEncriptado = 0;
 
-      for (int j = 0; j < caracterBinarioCompleto.length(); j++) 
+      for (int j = 0; j < caracterBinarioCompleto.length(); j++)
       {
-        if ((int)caracterBinarioCompleto[j] == 48) 
+        if ((int)caracterBinarioCompleto[j] == 48)
         {
           auxdouble = 0;
-        } 
-        else 
+        }
+        else
         {
           auxdouble = 1;
         }
@@ -580,7 +585,7 @@ String encriptar (String msn_orgin )
 ////////////////////////////////////////////////////////////////////////////
 ///////////////FUNCION PARA DESENCRIPTAR MENSAJES//////////////////////////
 ////////////////////////////////////////////////////////////////////////////
-String desencriptar (char* mensaje) 
+String desencriptar (char* mensaje)
 {
   char* TAG_ERROR = "ERROR";
   double auxiliarComprobacion;
@@ -590,9 +595,9 @@ String desencriptar (char* mensaje)
   String mensajeDescifrado = "";
   String mensajeString = (String)mensaje;
 
-  if (mensaje != "") 
+  if (mensaje != "")
   {
-    while (mensajeString.length() > 0) 
+    while (mensajeString.length() > 0)
     {
       mensajeCifrado = mensajeString.substring(0, mensajeString.indexOf(" "));
       mensajeString = mensajeString.substring(mensajeString.indexOf(" ") + 1);
@@ -600,22 +605,22 @@ String desencriptar (char* mensaje)
       //Reinicia el valor del auxiliar Binario
       //Recorre la mochila para la decodificacion del mensaje
       auxiliarBinario = "";
-      for (int j = 7; j >= 0; j--) 
+      for (int j = 7; j >= 0; j--)
       {
-        if (auxiliarComprobacion > 0) 
+        if (auxiliarComprobacion > 0)
         {
-          if (auxiliarComprobacion >= claveMochila[j]) 
+          if (auxiliarComprobacion >= claveMochila[j])
           {
             auxiliarComprobacion = auxiliarComprobacion - claveMochila[j];
             auxiliarBinario = "1" + auxiliarBinario;
-          } 
-          else 
+          }
+          else
           {
             auxiliarBinario = "0" + auxiliarBinario;
           }
         }
       }
-      if (auxiliarComprobacion == 0) 
+      if (auxiliarComprobacion == 0)
       {
         char charbinario[auxiliarBinario.length() + 1];
         auxiliarBinario.toCharArray(charbinario, auxiliarBinario.length() + 1);
@@ -627,7 +632,7 @@ String desencriptar (char* mensaje)
           k++;
         }
         mensajeDescifrado = (char)num + mensajeDescifrado;
-      } 
+      }
       else
       {
         return TAG_ERROR;
@@ -651,13 +656,13 @@ void getNtpTime()
   root.printTo(Data, sizeof(Data));
   mensajedatancritado = encriptar((String)Data);
   mensajedatancritado.replace(".00", "");
-  
+
   char charBufData[mensajedatancritado.length() + 1];
   mensajedatancritado.toCharArray(charBufData, mensajedatancritado.length() + 1);
   INS_WebSocketsClient.sendTXT(charBufData);
   jsonBuffer = StaticJsonBuffer<500>();
-  
-  for ( int i = 0; i < strlen(charBufData);  ++i ) 
+
+  for ( int i = 0; i < strlen(charBufData);  ++i )
   {
     charBufData[i] = (char)0;
   }
@@ -667,37 +672,39 @@ void getNtpTime()
 // METODO WEBSOCKECTEVENT QUE MANEJA LOS EVENTOS DEL WEBSOCKET ////////////
 ///////////////////////////////////////////////////////////////////////////
 
-void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght) 
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
 {
-  #ifdef DEBUG
+#ifdef DEBUG
   USE_SERIAL.printf("[SOCKE] **********************************\n");
   USE_SERIAL.printf("[SOCKE] TIPO: %d\n", type);
   USE_SERIAL.printf("[SOCKE] PAYLOAD: %s\n", payload);
   USE_SERIAL.printf("[SOCKE] LONGITUD: %d\n", lenght);
-  #endif
-  
-  switch (type) 
+#endif
+  webconectado = 1;
+
+  switch (type)
   {
-  ///////////////////////////////////////////////////////////////////////////
-    case WStype_DISCONNECTED: 
-    {
-        #ifdef DEBUG
-          USE_SERIAL.printf("[SOCKE] EVENTO DESCONEXION\n");
-        #endif
+    ///////////////////////////////////////////////////////////////////////////
+    case WStype_DISCONNECTED:
+      {
+#ifdef DEBUG
+        USE_SERIAL.printf("[SOCKE] EVENTO DESCONEXION\n");
+#endif
         webconectado = 0;
-        if(timedesconectado==0){
-          timedesconectado = now()+10;
+        if (timedesconectado == 0) {
+          timedesconectado = now() + 40;
         }
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
-    case WStype_CONNECTED: 
-    {
+    case WStype_CONNECTED:
+      {
         webconectado = 1;
         JsonObject& root = jsonBuffer.createObject();
-        root["dispositivo"] = "cccccccc";
+        root["dispositivo"] = identificador;
         root["accion"] = "presentacion";
-        root["data"] = "";
+        String ipaddress = WiFi.localIP().toString();
+        root["data"] = ipaddress;
         root.printTo(Data, sizeof(Data));
 
         mensajedatancritado = encriptar((String)Data);
@@ -708,28 +715,25 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
 
         INS_WebSocketsClient.sendTXT(charBufData);
 
-        for ( int i = 0; i < strlen(charBufData);  ++i ) 
+        for ( int i = 0; i < strlen(charBufData);  ++i )
         {
           charBufData[i] = (char)0;
         }
-        
+
         mensajedatancritado = "";
         jsonBuffer = StaticJsonBuffer<500>();
-        for ( int i = 0; i < sizeof(Data);  ++i ) 
+        for ( int i = 0; i < sizeof(Data);  ++i )
         {
           Data[i] = (char)0;
         }
-      
-        delay(100);
-        getNtpTime();
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
     case WStype_TEXT: {
 
-        #ifdef DEBUG
+#ifdef DEBUG
         USE_SERIAL.printf("[SOCKE] EVENTO MENSAJE\n");
-        #endif
+#endif
 
         //StaticJsonBuffer<500> jsonBufferSocket;
         char* palabra;
@@ -743,97 +747,97 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         const char* dispositivo    = rootSocket["dispositivo"];
         const char* accion    = rootSocket["accion"];
         ///////////////////////////////////////////////////////////////////////////
-        if (strcmp(accion, "DEL") == 0) 
+        if (strcmp(accion, "DEL") == 0)
         {
           const char* data    = rootSocket["data"];
           CharToByte(data);
-          
-          #ifdef TEST_RFID
+
+#ifdef TEST_RFID
           Serial.println("El usuario sera eliminado");
-          #endif
-          
-         if(Borrar_usuario(identificacion))
-         {
-          #ifdef TEST_RFID
-          Serial.println("El usuario ha sido eliminado");
-          #endif
-         }
-         else
-         {
-          #ifdef TEST_RFID
-          Serial.println("El usuario no esta registrado");
-          #endif
-         }
-          
+#endif
+
+          if (Borrar_usuario(identificacion))
+          {
+#ifdef TEST_RFID
+            Serial.println("El usuario ha sido eliminado");
+#endif
+          }
+          else
+          {
+#ifdef TEST_RFID
+            Serial.println("El usuario no esta registrado");
+#endif
+          }
+
         }
         ///////////////////////////////////////////////////////////////////////////
-        else if (strcmp(accion, "INS") == 0) 
+        else if (strcmp(accion, "INS") == 0)
         {
           const char* data    = rootSocket["data"];
           CharToByte(data);
           Insertar_Usuario(identificacion);
         }
         ///////////////////////////////////////////////////////////////////////////
-        else if (strcmp(accion, "UPD") == 0) 
+        else if (strcmp(accion, "UPD") == 0)
         {
           long longitud_data    = rootSocket["total"];
           long iteracion = 0;
-          int direccion=0;
-          int registrosDeMemoria= (Numero_de_usuarios)*4+1;
+          int direccion = 0;
+          int registrosDeMemoria = (Numero_de_usuarios) * 4 + 1;
           borar_memoria_EEPROM ();
-          for (long i = 0; i < longitud_data; i++) 
+          for (long i = 0; i < longitud_data; i++)
           {
             CharToByte(rootSocket["data"][i]);
-            if(i<longitud_data)
+            if (i < longitud_data)
             {
-              direccion= i*Tamano_id+1;
+              direccion = i * Tamano_id + 1;
               EEPROM.write(direccion, identificacion[0]);
-              EEPROM.write(direccion+1, identificacion[1]);
-              EEPROM.write(direccion+2, identificacion[2]);
-              EEPROM.write(direccion+3, identificacion[3]);
+              EEPROM.write(direccion + 1, identificacion[1]);
+              EEPROM.write(direccion + 2, identificacion[2]);
+              EEPROM.write(direccion + 3, identificacion[3]);
             }
             else
             {
-              direccion= i*Tamano_id+1;
+              direccion = i * Tamano_id + 1;
               EEPROM.write(direccion  , 0);
-              EEPROM.write(direccion+1, 0);
-              EEPROM.write(direccion+2, 0);
-              EEPROM.write(direccion+3, 0);          
+              EEPROM.write(direccion + 1, 0);
+              EEPROM.write(direccion + 2, 0);
+              EEPROM.write(direccion + 3, 0);
             }
-            
+
           }
-          EEPROM.write(0,(byte)longitud_data);
+          EEPROM.write(0, (byte)longitud_data);
           EEPROM.commit();
-          #ifdef DEBUG
+#ifdef DEBUG
           USE_SERIAL.println("La actualizacion fue exitosa");
-          #endif
+#endif
         }
         ///////////////////////////////////////////////////////////////////////////
-        else if (strcmp(accion, "HRO") == 0) 
+        else if (strcmp(accion, "HRO") == 0)
         {
-          #ifdef DEBUG
+#ifdef DEBUG
           USE_SERIAL.print("ESTA ES LA HORA: ");
           USE_SERIAL.println(mensajeservidor);
-          #endif
-          
+#endif
+
           setTime((int)rootSocket["data"][0], (int)rootSocket["data"][1], (int)rootSocket["data"][2], (int)rootSocket["data"][3], (int)rootSocket["data"][4], (int)rootSocket["data"][5]);
-          prevDisplay = now() + (1200 + (random(5400)));
-          #ifdef DEBUG
+          prevDisplay = now() + (1200 + (random(800)));
+#ifdef DEBUG
           USE_SERIAL.println("Tiempo para reset......");
-          USE_SERIAL.println((prevDisplay-now())/60);
-          #endif
+          USE_SERIAL.println((prevDisplay - now()) / 60);
+#endif
           reset = 1;
         }
         ///////////////////////////////////////////////////////////////////////////
-        else if (strcmp(accion, "PER") == 0) 
+        else if (strcmp(accion, "PER") == 0)
         {
           digitalWrite( Puerta , LOW );
           delay(1000);
           digitalWrite( Puerta , HIGH );
 
-          #ifdef DEBUG
+#ifdef DEBUG
           USE_SERIAL.println("SE LE DIO PERMISO");
-          #endif
+#endif
         }
         jsonBufferSocket = StaticJsonBuffer<1000>();
         for ( int i = 0; i < sizeof(charBufServer);  ++i ) {
@@ -842,23 +846,23 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
-    case WStype_BIN: 
-    {
+    case WStype_BIN:
+      {
         USE_SERIAL.printf("[SOCKE] Mensaje binario obtenido: %u\n", lenght);
         hexdump(payload, lenght);
         // send data to server
         // INS_WebSocketsClient.sendBIN(payload, lenght);
         break;
-    }
-     ///////////////////////////////////////////////////////////////////////////
+      }
+    ///////////////////////////////////////////////////////////////////////////
     case WStype_ERROR:
-    {
-       USE_SERIAL.printf("error en la comunicacion", lenght);
-       webconectado=0;
-    }
+      {
+        USE_SERIAL.printf("error en la comunicacion", lenght);
+        webconectado = 0;
+      }
   }
-  #ifdef DEBUG
+#ifdef DEBUG
   USE_SERIAL.printf("[SOCKE] **********************************\n");
-  #endif
+#endif
 }
 
