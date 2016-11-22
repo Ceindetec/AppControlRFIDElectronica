@@ -1,8 +1,10 @@
-
 ///////////////////////////////////////////////////////////////////////////
 // LIBRERIAS DEL PROYECTO /////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 #include <ESP8266WiFiMulti.h>
 #include <MFRC522.h>
 #include <ArduinoJson.h>
@@ -12,6 +14,7 @@
 #include <Hash.h>
 #include <TimeLib.h>
 
+
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE PINES Y VARIABLES ////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
@@ -19,8 +22,8 @@
 #define TEST_RFID
 #define RST_PIN  2    //Pin 9 para el reset del RC522
 #define SS_PIN  15   //Pin 10 para el SS (SDA) del RC522
-#define Programacion 5 // este indica si se leyo una tarjeta
-#define Conexion 4 // indica si hay coneccion a la red
+#define Programacion 4 // este indica si se leyo una tarjeta
+#define Conexion 5 // indica si hay coneccion a la red
 #define Puerta 16 //pin que corresponde al actuador
 #define Numero_de_usuarios 255
 #define Tamano_id 4
@@ -39,20 +42,23 @@ byte usuario[4];
 uint32_t Id;
 String UID;
 time_t prevDisplay = 0;//variable que guarda cuando se va hacer el reset
+time_t hultimomensaje = 0;
 bool reset = 0; // bandera para indicar el reset
 bool webconectado = 0; // bandera para indicar si el socket esta conectado
-bool configuracioninit = 0;
+bool configuracioninit = 0;//determina si ya se creo una configuracion para los eventos del websocket
+bool confirmacionmen = 0; // variable utilizada para saber si se recibio una confirmacion de un mensaje enviado
+time_t timeconfirmacionmen = 0; //variable que se utilizara para determinar el tiempo de espera de un mensaje de confirmacion
 time_t timedesconectado = 0; // variable time que se usar para dar un tiempo antes de volver a solicitar peticion al socket despues de una desconeccion
 
 StaticJsonBuffer<500> jsonBuffer;
-StaticJsonBuffer<1000> jsonBufferSocket;
+StaticJsonBuffer<1500> jsonBufferSocket;
 
 const char* ssid     = "CEINDETEC2";
 const char* password = "ceindetec123*";
 const char* ip_websocket = "192.168.0.245";
 const int port_websocket = 8082;
 
-const char* identificador = "cccccccc";
+const char* identificador = "aaaaaaaa";
 
 char Data[1024];
 char aux[4];
@@ -63,8 +69,6 @@ double claveMochila[] = {335916, 428891, 866985, 2139945, 4385521, 8713045, 1716
 MFRC522 INS_MFRC522(SS_PIN, RST_PIN); ///Creamos el objeto para el RC522
 ESP8266WiFiMulti WiFiMulti;
 WebSocketsClient INS_WebSocketsClient;
-
-
 
 ///////////////////////////////////////////////////////////////////////////
 // DEFINICION DE METODOS //////////////////////////////////////////////////
@@ -99,6 +103,8 @@ void setup()
   digitalWrite( Puerta , HIGH );
   digitalWrite( Conexion , HIGH );
 
+  
+
   Serial.begin(115200); //Iniciamos la comunicacion serial
   SPI.begin();        //Iniciamos el Bus SPI
   EEPROM.begin((Numero_de_usuarios * 4) + 1); //Iniciamos la Memoria EPROM
@@ -112,6 +118,10 @@ void setup()
   Serial.println("*****      VILLAVICENCIO - COLOMBIA      *****");
   Serial.println("**********************************************");
   delay(1000);
+
+   digitalWrite( Programacion , HIGH );
+   delay(500);
+   digitalWrite( Programacion , LOW);
 
 #ifdef TEST_RFID
   Serial.println("Control de acceso:");
@@ -127,12 +137,9 @@ void setup()
   USE_SERIAL.printf(ssid);
   USE_SERIAL.println();
 #endif
-
       
   WiFiMulti.addAP(ssid, password);
  
-  
-
 #ifdef DEBUG
   USE_SERIAL.println("");
   USE_SERIAL.printf("[SETUP] WiFi conectado ");
@@ -140,7 +147,41 @@ void setup()
   USE_SERIAL.println(WiFi.localIP());
 #endif
 
+  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+    Serial.println("Connection Failed! Rebooting...");
+    delay(5000);
+    ESP.restart();
+  }
 
+// Port defaults to 8266
+  // ArduinoOTA.setPort(8266);
+
+  // Hostname defaults to esp8266-[ChipID]
+   ArduinoOTA.setHostname(identificador);
+
+  // No authentication by default
+   ArduinoOTA.setPassword((const char *)"ceindetec123*");
+
+ ArduinoOTA.onStart([]() {
+    Serial.println("Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+
+   ArduinoOTA.begin();
+ 
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -148,8 +189,9 @@ void setup()
 ///////////////////////////////////////////////////////////////////////////
 void loop()
 {
+  ArduinoOTA.handle();
   time_t t = now();
-  if (WiFiMulti.run() != WL_CONNECTED && configuracioninit == 0) {
+  if (WiFiMulti.run() == WL_CONNECTED && configuracioninit == 0) {
     //INS_WebSocketsClient.disconnect();
     INS_WebSocketsClient.begin(ip_websocket, port_websocket);
     INS_WebSocketsClient.onEvent(webSocketEvent);
@@ -160,12 +202,12 @@ void loop()
   } else {
     digitalWrite( Conexion , LOW );
   }
-  if (webconectado == 0 && timedesconectado == 0) {
+  if (webconectado == 0 && timedesconectado == 0 && configuracioninit==1) {
     INS_WebSocketsClient.loop();
   }
-  if (webconectado == 1) {
+  if (webconectado == 1 && (WiFiMulti.run() == WL_CONNECTED)) {
     INS_WebSocketsClient.loop();
-  } else if (now() >= timedesconectado) {
+  } else if ((WiFiMulti.run() == WL_CONNECTED) && (now() >= timedesconectado)) {
     timedesconectado = 0;
     INS_WebSocketsClient.loop();
   }
@@ -175,6 +217,8 @@ void loop()
   {
     //Seleccionamos una tarjeta
     digitalWrite( Programacion , HIGH );
+    delay(100);
+    digitalWrite( Programacion , LOW);
     if ( INS_MFRC522.PICC_ReadCardSerial()) {
 #ifdef TEST_RFID
       USE_SERIAL.println("[LOOP_] ********************************");
@@ -215,9 +259,11 @@ void loop()
         char charBufData[mensajedatancritado.length() + 1];
         mensajedatancritado.toCharArray(charBufData, mensajedatancritado.length() + 1);
 
-        if (webconectado == 1)
+        if (webconectado == 1 && (WiFiMulti.run() == WL_CONNECTED))
         {
           USE_SERIAL.println("ENVIANDO MENSAJE");
+          confirmacionmen = 1;
+          timeconfirmacionmen = now();
           if (INS_WebSocketsClient.sendTXT(charBufData) == 1)
           {
             USE_SERIAL.println("MENSAJE ENVIADO");
@@ -270,9 +316,11 @@ void loop()
         delay(1000);
         digitalWrite( Puerta , HIGH );
 
-        if (webconectado == 1)
+        if (webconectado == 1 && (WiFiMulti.run() == WL_CONNECTED))
         {
           USE_SERIAL.println("ENVIANDO MENSAJE");
+          confirmacionmen = 1;
+          timeconfirmacionmen = now();
           if (INS_WebSocketsClient.sendTXT(charBufData) == 1)
           {
             USE_SERIAL.println("MENSAJE ENVIADO");
@@ -285,7 +333,6 @@ void loop()
             ESP.restart();
           }
         }
-
 
         for ( int i = 0; i < strlen(charBufData);  ++i )
         {
@@ -309,17 +356,25 @@ void loop()
       }
       INS_MFRC522.PICC_HaltA();// Terminamos la lectura de la tarjeta tarjeta  actual
     }
-    digitalWrite( Programacion , LOW);
   }
-  delay(100);
+  //delay(100);
   if (now() >= prevDisplay && reset == 1) {
+    INS_WebSocketsClient.disconnect();
+    delay(100);
+    ESP.restart();
+    reset = 0;
+  }else if(hultimomensaje+900<now()){
+    INS_WebSocketsClient.disconnect();
+    delay(100);
+    ESP.restart();
+    reset = 0;
+  }else if(confirmacionmen == 1 && timeconfirmacionmen+30 < now()){
     INS_WebSocketsClient.disconnect();
     delay(100);
     ESP.restart();
     reset = 0;
   }
 }
-
 
 ///////////////////////////////////////////////////////////////////////////
 ////////////////FUNCION PARA GUARDAR USUARIOS EN LA EEPROM/////////////////
@@ -340,7 +395,6 @@ boolean Guardar_Usuario(byte i_Array[]) {
   {
     return false;
   }
-
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -433,7 +487,6 @@ boolean compareArray(byte array1[], byte array2[])
 ////////////////////////////////////////////////////////////////////////////
 //////////////////FUNCION BORRAR TODOS LOS USUARIOS/////////////////////////
 ////////////////////////////////////////////////////////////////////////////
-
 void borar_memoria_EEPROM ()
 {
   int registrosDeMemoria = (Numero_de_usuarios) * 4 + 1;
@@ -581,7 +634,6 @@ String encriptar (String msn_orgin )
   return mensajeEncriptado;
 }
 
-
 ////////////////////////////////////////////////////////////////////////////
 ///////////////FUNCION PARA DESENCRIPTAR MENSAJES//////////////////////////
 ////////////////////////////////////////////////////////////////////////////
@@ -671,7 +723,6 @@ void getNtpTime()
 ///////////////////////////////////////////////////////////////////////////
 // METODO WEBSOCKECTEVENT QUE MANEJA LOS EVENTOS DEL WEBSOCKET ////////////
 ///////////////////////////////////////////////////////////////////////////
-
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
 {
 #ifdef DEBUG
@@ -692,7 +743,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
 #endif
         webconectado = 0;
         if (timedesconectado == 0) {
-          timedesconectado = now() + 40;
+          timedesconectado = now() + 10;
         }
         break;
       }
@@ -768,7 +819,6 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
             Serial.println("El usuario no esta registrado");
 #endif
           }
-
         }
         ///////////////////////////////////////////////////////////////////////////
         else if (strcmp(accion, "INS") == 0)
@@ -804,7 +854,6 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
               EEPROM.write(direccion + 2, 0);
               EEPROM.write(direccion + 3, 0);
             }
-
           }
           EEPROM.write(0, (byte)longitud_data);
           EEPROM.commit();
@@ -839,10 +888,15 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t lenght)
           USE_SERIAL.println("SE LE DIO PERMISO");
 #endif
         }
-        jsonBufferSocket = StaticJsonBuffer<1000>();
+        else if(strcmp(accion, "COF") == 0){
+          USE_SERIAL.println("Respuesta del servidor");
+          confirmacionmen = 0;
+        }
+        jsonBufferSocket = StaticJsonBuffer<1500>();
         for ( int i = 0; i < sizeof(charBufServer);  ++i ) {
           charBufServer[i] = (char)0;
         }
+        hultimomensaje = now();
         break;
       }
     ///////////////////////////////////////////////////////////////////////////
